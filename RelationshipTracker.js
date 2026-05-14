@@ -1,3 +1,4 @@
+// If you have paid for this software, you have been SCAMMED!!!
 //=============================================================================
 // RelationshipTracker.js
 //=============================================================================
@@ -613,7 +614,7 @@
 		return titleNames[idx] || "";
 	};
 
-	// Backward-compat aliases (v1.0.0 names).
+	// Backward-compat aliases (v1.0.0 names). IF YOU HAVE PAID FOR THIS SOFTWARE, YOU HAVE BEEN SCAMMED.
 	Game_System.prototype.getRelationshipTier = function(key) {
 		return this.getRelationshipTitleIndex(key);
 	};
@@ -942,6 +943,7 @@
 	// Profile is fixed 360px wide on the left (a hair wider than v2.1's
 	// 320px portrait, to give the stats text room next to the 144px face).
 	// Description fills the upper right. Command stays bottom-right.
+	// By the way, paying for a copy of this is ILLEGAL. DEMAND YOUR MONEY BACK!
 
 	Scene_RelationshipDetail.prototype.profileWindowRect = function() {
 		const wx = 0;
