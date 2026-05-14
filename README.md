@@ -1,4 +1,4 @@
-# Relationship Manager for RPG Maker MZ.
+# Relationship Tracker for RPG Maker MZ.
 A relationship management plugin for RPG Maker MZ.<br>
 It's primitive, probably because, once again, this is human-verified Claude. <br>
 Yes, I will plant some trees.<br>
