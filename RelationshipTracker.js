@@ -1,12 +1,18 @@
-// If you have paid for this software, you have been SCAMMED!!!
 //=============================================================================
 // RelationshipTracker.js
 //=============================================================================
 
 /*:
  * @target MZ
- * @plugindesc v2.2.0-beta Merges portrait+info into one profile window and adds editable character descriptions with text-code support.
- * @author wg481 and Claude
+ * @plugindesc v2.3.0-beta Adds soulmate name styling, configurable soulmate color, soulmate exclusivity enforcement, and tier-up SE + message notification.
+ * @author wg481 (Massimo Russell)
+ *
+ * Copyright 2026 wg481 (Massimo Russell). Developed with AI assistance
+ * from Anthropic's Claude. Licensed under the Apache License, Version 2.0,
+ * with additional terms requiring visible attribution in any product
+ * that incorporates this Work. See the LICENSE file distributed with this
+ * plugin for the full terms. A summary appears in the License section at
+ * the bottom of this @help block.
  *
  * @param menuCommandLabel
  * @text Menu Command Label
@@ -38,6 +44,35 @@
  * @type string
  * @desc Symbol shown next to a character in the menu when an event is available.
  * @default !
+ *
+ * @param soulmateColor
+ * @text Soulmate Color
+ * @type number
+ * @min 0
+ * @max 31
+ * @desc Color index (0–31 from the System palette) used for the soulmate's name and heart in the menu. Default: 3 (green).
+ * @default 3
+ *
+ * @param tierUpSe
+ * @text Tier-Up SE
+ * @type file
+ * @dir audio/se
+ * @desc Sound effect played when a character's title advances. Leave blank for no sound.
+ * @default
+ *
+ * @param tierUpSeVolume
+ * @text Tier-Up SE Volume
+ * @type number
+ * @min 0
+ * @max 100
+ * @desc Volume for the tier-up SE (0–100).
+ * @default 90
+ *
+ * @param tierUpMessage
+ * @text Tier-Up Message
+ * @type string
+ * @desc Message shown after returning from a tier-up event. %1 = display name, %2 = new title. Leave blank to disable.
+ * @default %1 is now %2.
  *
  * @param showSwitchId
  * @text Show Switch
@@ -235,6 +270,47 @@
  *   \C[2]Demon, daughter of Ba'al.\C[0]
  *   Found in the slums of Verras after the temple collapse.
  *
+ * ─── Tier-Up Notification ────────────────────────────────
+ * When a character's title actually changes (i.e., when an event below
+ * the choice threshold plays, or when Set Soulmate runs), the plugin
+ * fires a notification at the END of the event — when Return From
+ * Event runs. This is the Persona-style beat: event content plays,
+ * the sting drops, the player sees the new title, then returns home.
+ *
+ * Configure via three plugin parameters:
+ *   Tier-Up SE         — pick a file from audio/se. Blank = no sound.
+ *   Tier-Up SE Volume  — 0–100.
+ *   Tier-Up Message    — text shown by the notification. %1 = display
+ *                        name, %2 = new title. Blank = no message.
+ *                        Default: "%1 is now %2."
+ *
+ * The exact flow when an event launches a tier-up:
+ *   1. advanceCharacterEvent (or setSoulmate) runs, changing the title
+ *      and recording a pending tier-up on $gameSystem.
+ *   2. Player transfers to the event map; the autorun plays the scene.
+ *   3. Autorun ends with Return From Event. The plugin command plays
+ *      the SE and queues the message via $gameMessage.
+ *   4. $gameMessage displays the queued text; player dismisses it with
+ *      the action button. The transfer-back is gated on the message
+ *      window being free, so it waits for the dismissal.
+ *   5. Player transfers back to wherever the event was triggered from.
+ *
+ * Saves made mid-event-map preserve the pending tier-up, so a load
+ * followed by Return From Event still fires the notification.
+ *
+ * No notification fires for the 500/600/700 thresholds via
+ * advanceCharacterEvent (those don't change titles via that path):
+ * the 500 event triggers the notification only if Set Soulmate runs
+ * inside it; the 600/700 events are flavor moments where the title is
+ * already Soulmate.
+ *
+ * ─── Soulmate Styling ────────────────────────────────────
+ * Once a character is marked soulmate, their display name shows in the
+ * configured Soulmate Color with a heart (♥) appended, in both the
+ * relationship list and the detail page. The Soulmate Color parameter
+ * is a System palette index (0–31); default 3 is green. Use the editor's
+ * Database → Terms or any standard MZ color reference to pick a value.
+ *
  * ─── Core Model ──────────────────────────────────────────
  * Each character has independent state on $gameSystem:
  *   - points: 0–500 normally; 0–700 if marked soulmate.
@@ -250,9 +326,11 @@
  * the character — at the end of that story event, run Meet Character.
  * The 500 event is the choice point: a conditional branch inside its
  * event map decides whether the player stays Best Friends or becomes
- * Soulmate. Only one character can be soulmate at a time — enforcement
- * is the event author's job for now (use $gameSystem.getCurrentSoulmate()
- * to check before calling Set Soulmate).
+ * Soulmate. Only one character can be soulmate at a time. Since v2.3,
+ * the plugin itself enforces this — Set Soulmate refuses (with a console
+ * warning) when another soulmate already exists. The event-author
+ * pattern using `getCurrentSoulmate() === null` is still recommended so
+ * the player sees a graceful "let-down" branch instead of nothing.
  *
  * Threshold → title mapping (when the event plays):
  *   100 → Acquaintances    400 → Best Friends
@@ -284,9 +362,11 @@
  *    Event", which teleports the player back to where they were.
  *
  * 6. Inside the 500 event, present the choice. If the player chooses to
- *    become soulmates, call "Set Soulmate" (gated by a conditional that
- *    checks getCurrentSoulmate() === null if you want to enforce
- *    exclusivity).
+ *    become soulmates, call "Set Soulmate". Exclusivity is enforced by
+ *    the plugin (since v2.3), but it's still good practice to gate the
+ *    choice with a `getCurrentSoulmate() === null` conditional so the
+ *    player sees a coherent "someone else already" branch rather than a
+ *    silently-refused Set Soulmate call.
  *
  * ─── Script Calls ────────────────────────────────────────
  *   $gameSystem.getRelationshipPoints(key)
@@ -329,15 +409,49 @@
  * Set Description writes an override.
  *
  * ─── Known Limitations (Beta) ────────────────────────────
- * - Soulmate exclusivity is NOT enforced by the plugin. Calling
- *   Set Soulmate on a second character will mark both as soulmate.
- *   Use getCurrentSoulmate() in a conditional branch to gate the choice.
+ * - Soulmate exclusivity IS enforced (since v2.3) — Set Soulmate
+ *   refuses to assign a second soulmate. Authors are still encouraged
+ *   to gate the 500-event "soulmate" choice on
+ *   getCurrentSoulmate() === null so the player sees a graceful
+ *   alternative branch instead of nothing.
  * - Event maps teleport the player to (0, 0) facing down with a black
  *   fade. Author each event map's autorun to position the player and
  *   call Fadein Screen at the desired speed.
+ * - Autorun event maps need a Self Switch toggle at the end (Control
+ *   Self Switch A = ON) to prevent the autorun from re-triggering
+ *   before the Return From Event transfer fires. Add a blank second
+ *   event page conditioned on that switch.
  *
- * ─── Terms of Use ────────────────────────────────────────
- * Free for commercial and non-commercial use. Credit appreciated.
+ * ─── License ─────────────────────────────────────────────
+ * Copyright 2026 wg481 (Massimo Russell).
+ *
+ * Licensed under the Apache License, Version 2.0, with additional
+ * terms. The full text is in the LICENSE file distributed with this
+ * plugin. Summary of permissions and conditions:
+ *
+ *   PERMITTED:
+ *     - Commercial use
+ *     - Non-commercial use
+ *     - Modification
+ *     - Distribution
+ *     - Sublicensing under compatible terms (per Apache 2.0)
+ *
+ *   REQUIRED:
+ *     - Include a copy of the LICENSE file with any distribution that
+ *       contains this Work (Apache 2.0 §4(a)).
+ *     - If you modify the source files, mark each modified file with a
+ *       prominent notice stating that you changed it (§4(b)).
+ *     - Display the attribution line "Uses wg481's relationship
+ *       technology." in your product's visible credits, opening
+ *       titles, or about screen (ADDITIONAL TERMS, see LICENSE file).
+ *       The line must be legible and readable by end users during
+ *       normal operation; placement alongside other third-party
+ *       attributions is fine. The full LICENSE text does NOT need to
+ *       be reachable from in-game menus, only the attribution line.
+ *
+ *   NO WARRANTY: provided "AS IS" without warranty of any kind.
+ *
+ * If you do not agree to these terms, do not use this Work.
  */
 
 /*~struct~Character:
@@ -435,6 +549,10 @@
 	const pointsPerTier = Math.max(1, Number(params.pointsPerTier || 100));
 	const showSwitchId = Number(params.showSwitchId || 0);
 	const eventAvailableMarker = String(params.eventAvailableMarker || "!");
+	const soulmateColor = Math.max(0, Math.min(31, Number(params.soulmateColor || 3)));
+	const tierUpSe = String(params.tierUpSe || "");
+	const tierUpSeVolume = Math.max(0, Math.min(100, Number(params.tierUpSeVolume || 90)));
+	const tierUpMessage = String(params.tierUpMessage == null ? "%1 is now %2." : params.tierUpMessage);
 
 	const titleNames = (() => {
 		try {
@@ -526,6 +644,32 @@
 		return $gameSwitches && $gameSwitches.value(showSwitchId);
 	}
 
+	// Plays the configured tier-up SE if one is set. AudioManager.playSe
+	// takes a buzzer-like object; we build it with the configured volume
+	// at default pitch/pan. No-op if the param is empty.
+	function playTierUpSe() {
+		if (!tierUpSe) return;
+		AudioManager.playSe({
+			name: tierUpSe,
+			volume: tierUpSeVolume,
+			pitch: 100,
+			pan: 0
+		});
+	}
+
+	// Records a pending tier-up notification on $gameSystem. The actual
+	// display fires from Scene_Map.start when the player returns to the
+	// world (i.e., when _relationshipReturnPoint has been cleared). See
+	// the Scene_Map.start hook below for the display side. Stored on
+	// $gameSystem so it survives saves made inside an event map.
+	function queueTierUpNotification(displayName, titleName) {
+		if (!tierUpMessage) return; // Message disabled via empty param.
+		$gameSystem._pendingTierUpNotification = {
+			displayName: String(displayName),
+			titleName: String(titleName)
+		};
+	}
+
 	// Shared by the playCharacterEvent plugin command and the detail
 	// scene's Play Event command. Returns true if the transfer was
 	// queued, false if anything blocked it (no pending event, missing
@@ -614,7 +758,7 @@
 		return titleNames[idx] || "";
 	};
 
-	// Backward-compat aliases (v1.0.0 names). IF YOU HAVE PAID FOR THIS SOFTWARE, YOU HAVE BEEN SCAMMED.
+	// Backward-compat aliases (v1.0.0 names).
 	Game_System.prototype.getRelationshipTier = function(key) {
 		return this.getRelationshipTitleIndex(key);
 	};
@@ -699,8 +843,30 @@
 			console.warn(`${PLUGIN_NAME}: setSoulmate called on unmet character "${key}"`);
 			return;
 		}
+		if (data.isSoulmate) return; // Already soulmate — idempotent no-op.
+
+		// Exclusivity enforcement (added v2.3): refuse to set a second
+		// soulmate. Belt-and-suspenders behind the event-author conditional
+		// branch pattern (`getCurrentSoulmate() === null`). If exclusivity
+		// is wanted to be bypassed in the future, this is the single check
+		// to relax.
+		const existing = this.getCurrentSoulmate();
+		if (existing !== null && existing !== key) {
+			console.warn(`${PLUGIN_NAME}: setSoulmate refused for "${key}" — "${existing}" is already soulmate`);
+			return;
+		}
+
 		data.isSoulmate = true;
 		data.titleIndex = TITLE_SOULMATE_INDEX;
+
+		// Tier-up: soulmate title change happens here, not in
+		// advanceCharacterEvent (which deliberately doesn't change the
+		// title at/above choiceThreshold). The notification (SE + message)
+		// is deferred to returnFromEvent so it plays after the event
+		// content concludes, Persona-style — see returnFromEvent below.
+		const character = getCharacterConfig(key);
+		const titleName = this.getRelationshipTitleName(key);
+		queueTierUpNotification(character ? character.displayName : key, titleName);
 	};
 
 	Game_System.prototype.advanceCharacterEvent = function(key) {
@@ -712,13 +878,27 @@
 		const threshold = data.nextEventThreshold;
 		if (threshold === null) return;
 
-		if (threshold < choiceThreshold) {
+		const titleChanged = threshold < choiceThreshold;
+		if (titleChanged) {
 			data.titleIndex = Math.floor(threshold / pointsPerTier);
 		}
 		// At/above choiceThreshold: title is changed by setSoulmate() if
 		// the player chooses soulmate; otherwise it stays at Best Friends.
 
 		data.nextEventThreshold = threshold + pointsPerTier;
+
+		// Tier-up notification fires only when the title actually changed,
+		// which is the same condition as titleChanged above. The 500/600/700
+		// thresholds don't trigger this — soulmate progressions go through
+		// setSoulmate (which has its own notification), and the 600/700
+		// thresholds are flavor moments where the title stays at Soulmate.
+		// The SE + message is deferred to returnFromEvent so it plays
+		// after the event content concludes — see returnFromEvent below.
+		if (titleChanged) {
+			const character = getCharacterConfig(key);
+			const titleName = this.getRelationshipTitleName(key);
+			queueTierUpNotification(character ? character.displayName : key, titleName);
+		}
 	};
 
 	// — Return point —
@@ -870,7 +1050,8 @@
 		const titleIdx = $gameSystem.getRelationshipTitleIndex(key);
 		const titleName = titleNames[titleIdx] || "";
 		const nextEvent = $gameSystem.getNextEventThreshold(key);
-		const cap = $gameSystem.isSoulmate(key) ? soulmateCap : nonSoulmateCap;
+		const isSoulmate = $gameSystem.isSoulmate(key);
+		const cap = isSoulmate ? soulmateCap : nonSoulmateCap;
 		const pending = $gameSystem.hasPendingEvent(key);
 
 		let rankText;
@@ -890,8 +1071,16 @@
 		const nameWidth = Math.floor(rect.width * 0.5);
 		const rankWidth = rect.width - nameWidth;
 
+		// Soulmate styling: display name takes the configured palette
+		// color and is suffixed with a heart. Rank text stays default.
+		const nameText = isSoulmate ? `${character.displayName} \u2665` : character.displayName;
+		if (isSoulmate) {
+			this.changeTextColor(ColorManager.textColor(soulmateColor));
+		} else {
+			this.resetTextColor();
+		}
+		this.drawText(nameText, rect.x, rect.y, nameWidth, "left");
 		this.resetTextColor();
-		this.drawText(character.displayName, rect.x, rect.y, nameWidth, "left");
 		this.drawText(rankText, rect.x + nameWidth, rect.y, rankWidth, "right");
 	};
 
@@ -943,7 +1132,6 @@
 	// Profile is fixed 360px wide on the left (a hair wider than v2.1's
 	// 320px portrait, to give the stats text room next to the 144px face).
 	// Description fills the upper right. Command stays bottom-right.
-	// By the way, paying for a copy of this is ILLEGAL. DEMAND YOUR MONEY BACK!
 
 	Scene_RelationshipDetail.prototype.profileWindowRect = function() {
 		const wx = 0;
@@ -1062,14 +1250,25 @@
 		const labelWidth = 120;
 		const valueX = labelWidth + 16;
 		const valueWidth = this.contents.width - valueX;
+		const isSoulmate = $gameSystem.isSoulmate(key);
 		// Stats start below the face if one is configured, otherwise from
 		// the top of the window — no dead space when there's no face.
 		let y = character.faceName ? ImageManager.faceHeight + 12 : 0;
 
-		// Display name (slightly larger).
+		// Display name (slightly larger). For a soulmate, color the name
+		// with the configured palette index and append a heart — replacing
+		// v2.2's standalone "♥ Soulmate" line, which felt redundant next
+		// to the Title row.
 		const baseFontSize = $gameSystem.mainFontSize();
 		this.contents.fontSize = baseFontSize + 8;
-		this.drawText(character.displayName, 0, y, this.contents.width, "left");
+		const nameText = isSoulmate ? `${character.displayName} \u2665` : character.displayName;
+		if (isSoulmate) {
+			this.changeTextColor(ColorManager.textColor(soulmateColor));
+		} else {
+			this.resetTextColor();
+		}
+		this.drawText(nameText, 0, y, this.contents.width, "left");
+		this.resetTextColor();
 		y += lineHeight + 12;
 		this.contents.fontSize = baseFontSize;
 
@@ -1080,17 +1279,9 @@
 		this.drawText($gameSystem.getRelationshipTitleName(key), valueX, y, valueWidth, "left");
 		y += lineHeight;
 
-		// Soulmate badge (only shown if applicable).
-		if ($gameSystem.isSoulmate(key)) {
-			this.changeTextColor(ColorManager.powerUpColor());
-			this.drawText("\u2665 Soulmate", 0, y, this.contents.width, "left");
-			this.resetTextColor();
-			y += lineHeight;
-		}
-
 		// Points / cap.
 		const points = $gameSystem.getRelationshipPoints(key);
-		const cap = $gameSystem.isSoulmate(key) ? soulmateCap : nonSoulmateCap;
+		const cap = isSoulmate ? soulmateCap : nonSoulmateCap;
 		this.changeTextColor(ColorManager.systemColor());
 		this.drawText("Points:", 0, y, labelWidth, "left");
 		this.resetTextColor();
@@ -1220,6 +1411,25 @@
 			console.warn(`${PLUGIN_NAME}: returnFromEvent called but no return point saved`);
 			return;
 		}
+
+		// Tier-up notification (Persona-style): fire SE and queue the
+		// message HERE — after the event content has played, before the
+		// transfer back. Message goes through $gameMessage so the player
+		// dismisses it with the action button before the transfer fires
+		// (Scene_Map.updateTransferPlayer is gated on !isBusy()).
+		// Clears the pending flag so subsequent returns don't replay it.
+		const pending = $gameSystem._pendingTierUpNotification;
+		if (pending) {
+			playTierUpSe();
+			if (tierUpMessage) {
+				const text = tierUpMessage
+					.replace(/%1/g, pending.displayName)
+					.replace(/%2/g, pending.titleName);
+				$gameMessage.add(text);
+			}
+			$gameSystem._pendingTierUpNotification = null;
+		}
+
 		$gamePlayer.reserveTransfer(
 			returnPoint.mapId,
 			returnPoint.x,

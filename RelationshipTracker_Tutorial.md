@@ -11,11 +11,13 @@ A complete guide to setting up and using the RelationshipTracker plugin for RPG 
 5. [Event Authoring](#event-authoring)
 6. [The 500 Event and the Soulmate Choice](#the-500-event-and-the-soulmate-choice)
 7. [Descriptions](#descriptions)
-8. [Plugin Commands](#plugin-commands)
-9. [Script Calls](#script-calls)
-10. [State Model](#state-model)
-11. [Troubleshooting](#troubleshooting)
-12. [Known Limitations](#known-limitations)
+8. [Soulmate Styling](#soulmate-styling)
+9. [Tier-Up Notification](#tier-up-notification)
+10. [Plugin Commands](#plugin-commands)
+11. [Script Calls](#script-calls)
+12. [State Model](#state-model)
+13. [Troubleshooting](#troubleshooting)
+14. [Known Limitations](#known-limitations)
 
 ---
 
@@ -77,7 +79,12 @@ Open Test1's 100-Event map. Place an event at any tile, set its trigger to **Aut
 ```
 ◆Text: "Test1's 100-point event runs here."
 ◆Plugin Command: RelationshipTracker → Return From Event
+◆Control Self Switch: A = ON
 ```
+
+Then add a **second event page** to the same event, with no commands, and condition it on **Self Switch A = ON**.
+
+Why the self switch: autorun events re-trigger every frame as long as their page conditions hold. `Return From Event` reserves a transfer, but the autorun would restart before the transfer fires — infinite loop. The self switch toggle plus blank Page 2 lets the autorun fire exactly once, then go silent so the transfer can complete. This pattern is required on **every** event map.
 
 Return From Event teleports the player back to where they were when the event was triggered. **Every event map must end with it**, or the player will be stranded on the event map.
 
@@ -214,9 +221,14 @@ Each threshold event lives on its own dedicated map:
 1. Create a new map in the editor (note its ID).
 2. Set the map's appearance and tileset however the scene calls for.
 3. Place an Autorun event with the scene content.
-4. **End the event with `Return From Event`.**
+4. **End the event chain with `Return From Event`, then `Control Self Switch: A = ON`.**
+5. **Add a blank second event page conditioned on Self Switch A = ON.**
 
-The Return From Event plugin command teleports the player back to where they were when the event was triggered. Always place it at the end of the event chain on every event map, or the player will be stranded.
+The Return From Event plugin command teleports the player back to where they were when the event was triggered. Always place it near the end of the event chain on every event map, or the player will be stranded.
+
+The self-switch toggle plus blank Page 2 is the MZ-idiomatic way to make an autorun fire exactly once. Without it, the autorun re-triggers every frame, which prevents `Return From Event`'s reserved transfer from ever executing — the player is stuck in an infinite loop of the autorun restarting. This pattern is required on every event map; the plugin can't absorb it without deviating from MZ conventions in ways that could conflict with other plugins.
+
+The order **Return From Event → Control Self Switch** matters less in practice (both run in the same frame and the transfer fires only after the autorun terminates), but putting Return From Event first keeps the "this is the last meaningful thing the event does" reading intact.
 
 ### Fading in on event maps
 
@@ -255,9 +267,12 @@ Typical structure:
   :End
 :End
 ◆Plugin Command: Return From Event
+◆Control Self Switch: A = ON
 ```
 
-The conditional branch around `Set Soulmate` enforces exclusivity at authoring time: only one character can be soulmate, so if another character has already been chosen, this branch falls through to a "let-down" alternative.
+(And as with all event maps, a blank Page 2 conditioned on Self Switch A = ON.)
+
+**On soulmate exclusivity.** The conditional branch around `Set Soulmate` is the recommended UX pattern. Since v2.3, the plugin itself also enforces exclusivity — a `Set Soulmate` call on a second character is silently refused with a console warning. The conditional branch in your event handles the narrative side: instead of nothing happening when a player tries to pick a second soulmate, they see a coherent "someone else already" branch.
 
 If the player chooses Friends (or chooses More than friends but another soulmate already exists), the character stays at Best Friends. Their cap remains 500 and the 600/700 events are unreachable.
 
@@ -265,7 +280,7 @@ If `Set Soulmate` runs, the character's title becomes `Soulmate`, their cap rise
 
 ### Soulmate events (600 / 700)
 
-These are flavor moments — quiet scenes for the chosen soulmate after the big choice. Structurally identical to other event maps: autorun event, content, Return From Event at the end.
+These are flavor moments — quiet scenes for the chosen soulmate after the big choice. Structurally identical to other event maps: autorun event, content, Return From Event, Control Self Switch A = ON, blank Page 2.
 
 A non-soulmate character will never reach these because their cap is 500. The plugin renders `MAX` instead of a progress fraction once their points hit the cap and no further thresholds remain.
 
@@ -324,6 +339,78 @@ The description window does **not** auto-wrap text on width. `drawTextEx` honors
 
 ---
 
+## Soulmate Styling
+
+Once a character has been set as soulmate (via the `Set Soulmate` plugin command, typically inside the 500 event), their display name renders in a configurable color with a `♥` appended. This styling applies in both the relationship list and the detail page's profile panel.
+
+The color is controlled by the **Soulmate Color** plugin parameter — a System palette index from 0 to 31. The default is 3 (green). To pick a different color, open the editor's Database → System tab → Window image to see the 32-color palette, and use the index that corresponds to the color you want.
+
+Common indices:
+
+| Index | Color |
+|---|---|
+| 0 | White (default text) |
+| 1 | Blue |
+| 2 | Red |
+| 3 | Green (plugin default) |
+| 4 | Cyan |
+| 6 | Yellow |
+| 14 | Pink |
+| 17 | Light blue |
+| 24 | Orange |
+
+The styling applies the moment `Set Soulmate` runs. There's no need to refresh the menu manually — the next time the player opens it, the soulmate's name renders styled.
+
+---
+
+## Tier-Up Notification
+
+When a character's title actually changes — when an event below the 500-point threshold plays, or when `Set Soulmate` runs inside the 500 event — the plugin can play a sound effect and display a message. The notification is timed Persona-style: it fires at the **end** of the event content, just before the player returns to the world.
+
+The exact sequence:
+
+1. Event content plays on the event map (your dialogue, scene beats, etc.).
+2. The autorun event reaches the `Return From Event` plugin command.
+3. The tier-up SE plays. The tier-up message queues for display.
+4. The message appears in MZ's standard text window. The player advances past it with the action button (the same way they dismiss any dialogue).
+5. The player transfers back to where they triggered the event.
+
+If the player saves the game inside the event map and reloads later, the pending tier-up is preserved — when they reach Return From Event, the notification still fires.
+
+### Configuration
+
+Three plugin parameters control this:
+
+**Tier-Up SE** — a sound effect file from `audio/se`. The Plugin Manager gives you a file picker. Leave blank to disable the sound entirely. Good choices for an upgrade stinger include the default MZ SEs like `Item3`, `Skill3`, or `Heal4`.
+
+**Tier-Up SE Volume** — 0 to 100. Default 90.
+
+**Tier-Up Message** — the text shown by the notification. Supports two placeholders:
+- `%1` is replaced with the character's display name
+- `%2` is replaced with the new title
+
+Default: `"%1 is now %2."` — which produces output like `Lillith is now Friends.` or `Ciel is now Soulmate.`
+
+Leave the message field blank to suppress the text and play only the SE.
+
+### When the notification does and doesn't fire
+
+The notification fires when a title actually changes. That means:
+
+| Event | Notification? |
+|---|---|
+| 100, 200, 300, 400 event plays | Yes — title advances |
+| 500 event with `Set Soulmate` | Yes — title becomes Soulmate |
+| 500 event without `Set Soulmate` | No — title stays Best Friends |
+| 500 event where `Set Soulmate` was refused (someone else is already soulmate) | No — no state change |
+| 600, 700 event plays | No — title is already Soulmate |
+
+### A note on manual `Set Soulmate` calls
+
+The notification only fires when the event-launch flow (Play Character Event → event map → Return From Event) is in play. If you call `Set Soulmate` from a context that doesn't go through Return From Event — e.g., a standalone cutscene event in the world — the title change happens silently. In practice this isn't a problem because soulmate is supposed to be set inside the 500 event. If you need to grant soulmate status from somewhere else and you want feedback, play the SE manually and show a message yourself.
+
+---
+
 ## Plugin Commands
 
 All seven plugin commands are accessed through the editor's event command picker → "Plugin Command..." → RelationshipTracker.
@@ -372,13 +459,13 @@ If no return point is saved (e.g. an event map autoruns without having been ente
 
 ### Set Soulmate
 
-Marks a character as the player's soulmate. Raises their cap from 500 to 700 and sets their title to `Soulmate`.
+Marks a character as the player's soulmate. Raises their cap from 500 to 700 and sets their title to `Soulmate`. Also fires the tier-up notification (SE + message) when the next `Return From Event` runs.
 
 - **key**: character key
 
-Typically called inside the 500 event's conditional branch on the "soulmate" choice. Not automatically called by the plugin — the choice is delegated to the event author.
+Typically called inside the 500 event's conditional branch on the "soulmate" choice.
 
-Soulmate exclusivity is not enforced by the plugin; gate the call with a Conditional Branch checking `$gameSystem.getCurrentSoulmate() === null`.
+**Exclusivity is enforced.** If another character is already the soulmate, this call is silently refused with a console warning — no state change. Calling on the same character who is already soulmate is a silent no-op. The author-side `$gameSystem.getCurrentSoulmate() === null` conditional is still recommended so the player sees a "someone else already" branch rather than a silent refusal.
 
 ### Set Description
 
@@ -557,6 +644,7 @@ The plugin emits warnings (visible in the developer console — F8 in playtest) 
 - `meetCharacter called with unknown key "X"` — typo in the key, or the character entry isn't configured
 - `setSoulmate called on unmet character "X"` — you tried to set soulmate before meeting them
 - `setSoulmate called with unknown key "X"` — key typo
+- `setSoulmate refused for "X" — "Y" is already soulmate` — exclusivity blocked a second-soulmate assignment. Either intentional (your conditional branch is working) or a bug in your branching logic.
 - `setDescription called with unknown key "X"` — key typo
 - `triggerCharacterEvent called for "X" but no event is pending` — Play Character Event ran when no event was pending (usually a Conditional Branch mistake)
 - `no event map configured for "X" at threshold N` — Play Character Event ran for a threshold with no map ID
@@ -564,7 +652,7 @@ The plugin emits warnings (visible in the developer console — F8 in playtest) 
 
 ### Save compatibility
 
-The plugin's state lives on `$gameSystem`, so it's saved automatically. Loading a save from before the plugin was installed works fine — characters start as unmet with zero points. Loading a save from an older plugin version (v2.0 or v2.1) into v2.2 also works — the new description field is backfilled lazily.
+The plugin's state lives on `$gameSystem`, so it's saved automatically. Loading a save from before the plugin was installed works fine — characters start as unmet with zero points. Loading a save from an older plugin version (v2.0/v2.1/v2.2) into v2.3 also works — newer fields are backfilled lazily as they're accessed.
 
 ---
 
@@ -572,11 +660,12 @@ The plugin's state lives on `$gameSystem`, so it's saved automatically. Loading 
 
 These are intentional design choices or known caveats, not bugs:
 
-- **Soulmate exclusivity is event-author-enforced.** Calling `Set Soulmate` on a second character marks both as soulmate. Use the Conditional Branch pattern in [The 500 Event](#the-500-event-and-the-soulmate-choice) to prevent it.
+- **Autorun event maps need a Self Switch toggle.** Without `Control Self Switch A = ON` plus a blank Page 2 conditioned on it, autoruns re-trigger every frame before the Return From Event transfer can fire. See [Event maps](#event-maps).
 - **Teleport entry point is (0, 0) facing down.** Author each event map to reposition the player as the first thing it does.
 - **No portrait fallback.** If `faceName` is blank or the file is missing, the portrait area is empty (the stats slide up to occupy the space). No silhouette or placeholder.
 - **Empty character list shows a blank menu.** No "no characters configured" placeholder text.
 - **Duplicate keys are silent.** Don't reuse keys.
 - **No navigation between characters within the detail screen.** Back to the list, then pick another.
 - **Description does not auto-wrap on width.** Insert line breaks manually with Enter.
+- **Tier-up notification only fires through the event-map flow.** A manual `Set Soulmate` call outside a Play Character Event → Return From Event pairing won't fire the SE or message. See [Tier-Up Notification](#tier-up-notification).
 - **MV not supported.** MZ only — the plugin uses MZ-specific APIs.
