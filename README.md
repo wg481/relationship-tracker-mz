@@ -28,7 +28,7 @@ View the [tutorial](RelationshipTracker_Tutorial.md) for usage.
 * Save-compatible state model on $gameSystem.
 
 ## Feature Requests
-[] MV Backport
+- [ ] MV Backport
 All other feature requests, add to issues.
 
 ### AI DISCLOSURE
